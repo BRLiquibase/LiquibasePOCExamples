@@ -1,0 +1,27 @@
+pipeline {
+    agent any
+    
+    environment {
+        LIQUIBASE_COMMAND_URL = credentials('postgres-url')
+        LIQUIBASE_COMMAND_USERNAME = credentials('postgres-user')
+        LIQUIBASE_COMMAND_PASSWORD = credentials('postgres-pass')
+        LIQUIBASE_LICENSE_KEY = credentials('liquibase-license')
+    }
+    
+    stages {
+        stage('Deploy Changes') {
+            steps {
+                sh 'liquibase flow --flow-file=liquibase.flowfile.yaml deploy'
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo 'Database deployment completed successfully'
+        }
+        failure {
+            echo 'Database deployment failed'
+        }
+    }
+}
