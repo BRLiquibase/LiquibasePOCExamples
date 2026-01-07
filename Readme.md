@@ -6,7 +6,7 @@ Simple Liquibase setup for PostgreSQL deployments.
 
 1. Clone this repository
 2. Update `liquibase.properties` with your database connection
-3. Run: `liquibase update`
+3. Run: `liquibase flow`
 
 ## Structure
 
@@ -14,6 +14,7 @@ Simple Liquibase setup for PostgreSQL deployments.
 - `changelog/changelog-root.xml` - Main changelog (auto-includes all SQL files)
 - `changelog/v1.x/` - Versioned SQL changesets
 - `liquibase.flowfile.yaml` - Workflow definitions
+- `liquibase.flowfile.rollback.yaml` - Workflow definition for rollbacks
 - `Jenkinsfile` - CI/CD pipeline
 
 ## Local Commands
@@ -37,7 +38,7 @@ liquibase flow --flow-file=liquibase.flowfile.yaml deploy
 
 ## Jenkins Setup
 
-Configure these credentials in Jenkins:
+Some variables you might need. Configure these credentials in Jenkins:
 - `postgres-url` - Example: `jdbc:postgresql://db-server:5432/mydb`
 - `postgres-user` - Database username
 - `postgres-pass` - Database password
