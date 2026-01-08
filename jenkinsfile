@@ -11,7 +11,7 @@ pipeline {
     stages {
         stage('Deploy Changes') {
             steps {
-                sh 'liquibase flow --flow-file=liquibase.flowfile.yaml deploy'
+                sh 'liquibase flow --flow-file=liquibase.flowfile.yaml'
             }
         }
     }
