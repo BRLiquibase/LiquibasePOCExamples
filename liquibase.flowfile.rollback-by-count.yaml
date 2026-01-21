@@ -1,32 +1,29 @@
-##########           LIQUIBASE FLOWFILE                ##########
-##########  learn more http://docs.liquibase.com/flow  ##########
+##########           LIQUIBASE FLOWFILE - ROLLBACK BY COUNT    ##########
+##########  learn more http://docs.liquibase.com/flow          ##########
+
+## USAGE:
+## export ROLLBACK_COUNT=3
+## liquibase flow --flow-file=liquibase.flowfile.rollback-by-count.yaml
+##
+## EXAMPLES:
+## export ROLLBACK_COUNT=1   # Rollback last changeset
+## export ROLLBACK_COUNT=5   # Rollback last 5 changesets
 
 ## Note: Any command which fails in any stage below result in the command stopping, and endStage being run.
 ## A flow file can have one or more stages, each with multiple "actions", 
 ## or your flow file can have multiple stages with fewer actions in each stage.
 stages:
 
-
-  ## The first stage of actions. 
+  ## Rollback by count stage
   Default:
         
     actions:
       #
-      # Policy Checks for changelog
+      # Rollback last N changesets
       #
       - type: liquibase
-        command: checks run
-        cmdArgs: {checks-scope: changelog}
-      #
-      # Run the update
-      #
-
-      - type: liquibase
-        command: tag
-        cmdArgs: {tag: "${TAG_NAME}"}
-
-      - type: liquibase
-        command: update
+        command: rollback-count
+        cmdArgs: {count: "${ROLLBACK_COUNT}"}
 
 ## The endStage ALWAYS RUNS. 
 ## So put actions here which you desire to perform whether previous stages' actions succeed or fail.

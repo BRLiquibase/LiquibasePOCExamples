@@ -1,32 +1,30 @@
-##########           LIQUIBASE FLOWFILE                ##########
-##########  learn more http://docs.liquibase.com/flow  ##########
+##########           LIQUIBASE FLOWFILE - ROLLBACK BY TAG      ##########
+##########  learn more http://docs.liquibase.com/flow          ##########
+
+## USAGE:
+## export TAG_NAME=v1.0.0
+## liquibase flow --flow-file=liquibase.flowfile.rollback-by-tag.yaml
+##
+## EXAMPLES:
+## export TAG_NAME=v1.0.0              # Rollback to v1.0.0 tag
+## export TAG_NAME=pre-deployment      # Rollback to pre-deployment tag
+## export TAG_NAME=before-feature-x    # Rollback to before-feature-x tag
 
 ## Note: Any command which fails in any stage below result in the command stopping, and endStage being run.
 ## A flow file can have one or more stages, each with multiple "actions", 
 ## or your flow file can have multiple stages with fewer actions in each stage.
 stages:
 
-
-  ## The first stage of actions. 
+  ## Rollback to tag stage
   Default:
         
     actions:
       #
-      # Policy Checks for changelog
+      # Rollback to specific tag
       #
       - type: liquibase
-        command: checks run
-        cmdArgs: {checks-scope: changelog}
-      #
-      # Run the update
-      #
-
-      - type: liquibase
-        command: tag
+        command: rollback
         cmdArgs: {tag: "${TAG_NAME}"}
-
-      - type: liquibase
-        command: update
 
 ## The endStage ALWAYS RUNS. 
 ## So put actions here which you desire to perform whether previous stages' actions succeed or fail.
