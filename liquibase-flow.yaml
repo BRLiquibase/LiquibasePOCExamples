@@ -1,0 +1,288 @@
+# Liquibase Flow: Generate & Split Changelog by Object Type
+# 
+# This flow:
+# 1. Generates changelog from existing database
+# 2. Splits changesets into individual files
+# 3. Organizes by object type (tables, indexes, views, etc.)
+# 4. Adds runOnChange:true to all changesets
+# 5. Creates master changelog with proper dependency ordering
+
+globalVariables:
+  OUTPUT_DIR: out
+  DATABASE_TYPE: postgresql
+
+stages:
+
+  # Stage 1: Create directory structure
+  make-folders:
+    actions:
+      - type: shell
+        command: |
+          bash -lc '
+          set -e
+          echo "Creating directory structure..."
+          mkdir -p "${OUTPUT_DIR}"/{_meta,tables,primarykeys,indexes,foreignkeys,uniqueconstraints,views,sequences,functions,storedprocedures,triggers,checkconstraints}
+          '
+
+  # Stage 2: Generate initial changelog
+  generate-initial-changelog:
+    actions:
+      - type: liquibase
+        command: generate-changelog
+        cmdArgs:
+          changelog-file: "${OUTPUT_DIR}/_meta/generated-full.sql"
+          diff-types: "tables,primarykeys,indexes,foreignkeys,uniqueconstraints,views,sequences,functions,storedprocedures,triggers,checkconstraints"
+
+  # Stage 3: Split changelog into organized files
+  split-changelog:
+    actions:
+      - type: shell
+        command: |
+          bash -lc '
+          set -e
+          
+          OUTPUT_DIR="${OUTPUT_DIR:-out}"
+          SOURCE_FILE="${OUTPUT_DIR}/_meta/generated-full.sql"
+          MASTER_CHANGELOG="${OUTPUT_DIR}/master-changelog.sql"
+          
+          echo "Splitting changesets from ${SOURCE_FILE}..."
+          
+          # Initialize master changelog
+          cat > "${MASTER_CHANGELOG}" << EOF
+-- liquibase formatted sql
+
+-- Master changelog - organized by object type in dependency order
+-- Generated from existing database with runOnChange:true
+
+EOF
+          
+          # Track changeset counts per type
+          declare -A type_counts
+          
+          # Read the file and process changesets
+          current_changeset=""
+          current_author=""
+          current_id=""
+          current_attrs=""
+          in_changeset=false
+          
+          while IFS= read -r line || [ -n "$line" ]; do
+            # Check if this is a changeset header
+            if [[ "$line" =~ ^[[:space:]]*--[[:space:]]*changeset[[:space:]]+([^:]+):([^[:space:]]+)(.*)$ ]]; then
+              # Save previous changeset if exists
+              if [ "$in_changeset" = true ] && [ -n "$current_changeset" ]; then
+                # Detect object type and name
+                obj_type="tables"
+                obj_name=""
+                
+                # Convert to uppercase for pattern matching
+                upper_sql=$(echo "$current_changeset" | tr "[:lower:]" "[:upper:]")
+                
+                # Detect object type
+                if echo "$upper_sql" | grep -q "CREATE[[:space:]]*TABLE"; then
+                  obj_type="tables"
+                  obj_name=$(echo "$current_changeset" | grep -i "CREATE[[:space:]]*TABLE" | sed -E "s/.*CREATE[[:space:]]+TABLE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                elif echo "$upper_sql" | grep -q "PRIMARY[[:space:]]*KEY"; then
+                  obj_type="primarykeys"
+                  obj_name=$(echo "$current_changeset" | grep -i "ALTER[[:space:]]*TABLE" | sed -E "s/.*ALTER[[:space:]]+TABLE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                elif echo "$upper_sql" | grep -q "CREATE.*INDEX"; then
+                  obj_type="indexes"
+                  obj_name=$(echo "$current_changeset" | grep -i "CREATE.*INDEX" | sed -E "s/.*INDEX[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                elif echo "$upper_sql" | grep -q "FOREIGN[[:space:]]*KEY"; then
+                  obj_type="foreignkeys"
+                  obj_name=$(echo "$current_changeset" | grep -i "ALTER[[:space:]]*TABLE" | sed -E "s/.*ALTER[[:space:]]+TABLE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                elif echo "$upper_sql" | grep -q "UNIQUE"; then
+                  obj_type="uniqueconstraints"
+                  obj_name=$(echo "$current_changeset" | grep -i "ALTER[[:space:]]*TABLE" | sed -E "s/.*ALTER[[:space:]]+TABLE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                elif echo "$upper_sql" | grep -q "CREATE.*VIEW"; then
+                  obj_type="views"
+                  obj_name=$(echo "$current_changeset" | grep -i "CREATE.*VIEW" | sed -E "s/.*VIEW[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                elif echo "$upper_sql" | grep -q "CREATE[[:space:]]*SEQUENCE"; then
+                  obj_type="sequences"
+                  obj_name=$(echo "$current_changeset" | grep -i "CREATE[[:space:]]*SEQUENCE" | sed -E "s/.*SEQUENCE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                elif echo "$upper_sql" | grep -q "CREATE.*FUNCTION"; then
+                  obj_type="functions"
+                  obj_name=$(echo "$current_changeset" | grep -i "CREATE.*FUNCTION" | sed -E "s/.*FUNCTION[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                elif echo "$upper_sql" | grep -q "CREATE.*PROCEDURE"; then
+                  obj_type="storedprocedures"
+                  obj_name=$(echo "$current_changeset" | grep -i "CREATE.*PROCEDURE" | sed -E "s/.*PROCEDURE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                elif echo "$upper_sql" | grep -q "CREATE.*TRIGGER"; then
+                  obj_type="triggers"
+                  obj_name=$(echo "$current_changeset" | grep -i "CREATE.*TRIGGER" | sed -E "s/.*TRIGGER[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                elif echo "$upper_sql" | grep -q "CHECK"; then
+                  obj_type="checkconstraints"
+                  obj_name=$(echo "$current_changeset" | grep -i "ALTER[[:space:]]*TABLE" | sed -E "s/.*ALTER[[:space:]]+TABLE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+                fi
+                
+                # Generate filename
+                if [ -n "$obj_name" ] && [ "$obj_name" != "$current_changeset" ]; then
+                  filename="${current_id}-${obj_name}.sql"
+                else
+                  type_counts[$obj_type]=$((${type_counts[$obj_type]:-0} + 1))
+                  filename="${current_id}-${type_counts[$obj_type]}.sql"
+                fi
+                
+                filepath="${OUTPUT_DIR}/${obj_type}/${filename}"
+                
+                # Add runOnChange if not present
+                if ! echo "$current_attrs" | grep -qi "runOnChange"; then
+                  if [ -n "$current_attrs" ]; then
+                    current_attrs="${current_attrs} runOnChange:true"
+                  else
+                    current_attrs="runOnChange:true"
+                  fi
+                fi
+                
+                # Write the changeset file
+                {
+                  echo "-- changeset ${current_author}:${current_id} ${current_attrs}"
+                  echo "$current_changeset"
+                } > "$filepath"
+                
+                echo "  Created: ${obj_type}/${filename}"
+                
+                # Track for master changelog (we will sort these later)
+                echo "${obj_type}|${obj_type}/${filename}" >> "${OUTPUT_DIR}/_meta/changeset_list.tmp"
+              fi
+              
+              # Start new changeset
+              current_author="${BASH_REMATCH[1]}"
+              current_id="${BASH_REMATCH[2]}"
+              current_attrs="${BASH_REMATCH[3]}"
+              current_changeset=""
+              in_changeset=true
+            elif [ "$in_changeset" = true ]; then
+              # Accumulate changeset content
+              if [ -n "$current_changeset" ]; then
+                current_changeset="${current_changeset}
+${line}"
+              else
+                current_changeset="${line}"
+              fi
+            fi
+          done < "$SOURCE_FILE"
+          
+          # Handle last changeset
+          if [ "$in_changeset" = true ] && [ -n "$current_changeset" ]; then
+            obj_type="tables"
+            obj_name=""
+            upper_sql=$(echo "$current_changeset" | tr "[:lower:]" "[:upper:]")
+            
+            if echo "$upper_sql" | grep -q "CREATE[[:space:]]*TABLE"; then
+              obj_type="tables"
+              obj_name=$(echo "$current_changeset" | grep -i "CREATE[[:space:]]*TABLE" | sed -E "s/.*CREATE[[:space:]]+TABLE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            elif echo "$upper_sql" | grep -q "PRIMARY[[:space:]]*KEY"; then
+              obj_type="primarykeys"
+              obj_name=$(echo "$current_changeset" | grep -i "ALTER[[:space:]]*TABLE" | sed -E "s/.*ALTER[[:space:]]+TABLE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            elif echo "$upper_sql" | grep -q "CREATE.*INDEX"; then
+              obj_type="indexes"
+              obj_name=$(echo "$current_changeset" | grep -i "CREATE.*INDEX" | sed -E "s/.*INDEX[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            elif echo "$upper_sql" | grep -q "FOREIGN[[:space:]]*KEY"; then
+              obj_type="foreignkeys"
+              obj_name=$(echo "$current_changeset" | grep -i "ALTER[[:space:]]*TABLE" | sed -E "s/.*ALTER[[:space:]]+TABLE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            elif echo "$upper_sql" | grep -q "UNIQUE"; then
+              obj_type="uniqueconstraints"
+              obj_name=$(echo "$current_changeset" | grep -i "ALTER[[:space:]]*TABLE" | sed -E "s/.*ALTER[[:space:]]+TABLE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            elif echo "$upper_sql" | grep -q "CREATE.*VIEW"; then
+              obj_type="views"
+              obj_name=$(echo "$current_changeset" | grep -i "CREATE.*VIEW" | sed -E "s/.*VIEW[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            elif echo "$upper_sql" | grep -q "CREATE[[:space:]]*SEQUENCE"; then
+              obj_type="sequences"
+              obj_name=$(echo "$current_changeset" | grep -i "CREATE[[:space:]]*SEQUENCE" | sed -E "s/.*SEQUENCE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            elif echo "$upper_sql" | grep -q "CREATE.*FUNCTION"; then
+              obj_type="functions"
+              obj_name=$(echo "$current_changeset" | grep -i "CREATE.*FUNCTION" | sed -E "s/.*FUNCTION[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            elif echo "$upper_sql" | grep -q "CREATE.*PROCEDURE"; then
+              obj_type="storedprocedures"
+              obj_name=$(echo "$current_changeset" | grep -i "CREATE.*PROCEDURE" | sed -E "s/.*PROCEDURE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            elif echo "$upper_sql" | grep -q "CREATE.*TRIGGER"; then
+              obj_type="triggers"
+              obj_name=$(echo "$current_changeset" | grep -i "CREATE.*TRIGGER" | sed -E "s/.*TRIGGER[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            elif echo "$upper_sql" | grep -q "CHECK"; then
+              obj_type="checkconstraints"
+              obj_name=$(echo "$current_changeset" | grep -i "ALTER[[:space:]]*TABLE" | sed -E "s/.*ALTER[[:space:]]+TABLE[[:space:]]+[\\"\`]?([A-Za-z0-9_]+)[\\"\`]?.*/\\1/" | head -1 | tr "[:upper:]" "[:lower:]")
+            fi
+            
+            if [ -n "$obj_name" ] && [ "$obj_name" != "$current_changeset" ]; then
+              filename="${current_id}-${obj_name}.sql"
+            else
+              type_counts[$obj_type]=$((${type_counts[$obj_type]:-0} + 1))
+              filename="${current_id}-${type_counts[$obj_type]}.sql"
+            fi
+            
+            filepath="${OUTPUT_DIR}/${obj_type}/${filename}"
+            
+            if ! echo "$current_attrs" | grep -qi "runOnChange"; then
+              if [ -n "$current_attrs" ]; then
+                current_attrs="${current_attrs} runOnChange:true"
+              else
+                current_attrs="runOnChange:true"
+              fi
+            fi
+            
+            {
+              echo "-- changeset ${current_author}:${current_id} ${current_attrs}"
+              echo "$current_changeset"
+            } > "$filepath"
+            
+            echo "  Created: ${obj_type}/${filename}"
+            echo "${obj_type}|${obj_type}/${filename}" >> "${OUTPUT_DIR}/_meta/changeset_list.tmp"
+          fi
+          
+          # Build master changelog in dependency order
+          echo ""
+          echo "Building master changelog..."
+          
+          dependency_order=(
+            "tables"
+            "primarykeys"
+            "uniqueconstraints"
+            "indexes"
+            "sequences"
+            "foreignkeys"
+            "views"
+            "functions"
+            "storedprocedures"
+            "triggers"
+            "checkconstraints"
+          )
+          
+          total_count=0
+          for obj_type in "${dependency_order[@]}"; do
+            if [ -f "${OUTPUT_DIR}/_meta/changeset_list.tmp" ]; then
+              matching=$(grep "^${obj_type}|" "${OUTPUT_DIR}/_meta/changeset_list.tmp" | wc -l)
+              if [ "$matching" -gt 0 ]; then
+                echo "-- ===== ${obj_type^^} =====" >> "${MASTER_CHANGELOG}"
+                grep "^${obj_type}|" "${OUTPUT_DIR}/_meta/changeset_list.tmp" | cut -d"|" -f2 | while read -r filepath; do
+                  echo "--include file:${filepath}" >> "${MASTER_CHANGELOG}"
+                done
+                echo "" >> "${MASTER_CHANGELOG}"
+                total_count=$((total_count + matching))
+                echo "  ${obj_type}: ${matching} files"
+              fi
+            fi
+          done
+          
+          # Cleanup temp file
+          rm -f "${OUTPUT_DIR}/_meta/changeset_list.tmp"
+          
+          echo ""
+          echo "Master changelog created: ${MASTER_CHANGELOG}"
+          echo "Total changesets split: ${total_count}"
+          '
+
+  # Stage 4: Validate the split changelog structure
+  validate-structure:
+    actions:
+      - type: shell
+        command: |
+          bash -lc '
+          set -e
+          echo "Validating directory structure..."
+          find "${OUTPUT_DIR}" -type f -name "*.sql" | wc -l | xargs echo "Total SQL files created:"
+          echo ""
+          echo "Master changelog location: ${OUTPUT_DIR}/master-changelog.sql"
+          echo ""
+          echo "To apply these changes to a database, run:"
+          echo "  liquibase update --changelog-file=${OUTPUT_DIR}/master-changelog.sql"
+          '
